@@ -1,0 +1,36 @@
+title: Network Configuration Discovery
+id: 7c9d2e8b-3a4f-4f1a-8b2c-9c6e7b3f1f04
+status: experimental
+description: |
+  Detects classic local network-config recon (ifconfig / ip a / route /
+  netstat) inside a container. Useful early-stage signal alongside the
+  generic recon detection (T1059.004).
+references:
+  - https://attack.mitre.org/techniques/T1016/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.discovery
+  - attack.t1016
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_simple_netconfig:
+    Image|endswith:
+      - '/ifconfig'
+      - '/route'
+      - '/netstat'
+      - '/ss'
+  selection_ip_subcommand:
+    Image|endswith: '/ip'
+    CommandLine|contains:
+      - ' a'
+      - ' addr'
+      - ' route'
+      - ' link'
+  condition: selection_simple_netconfig or selection_ip_subcommand
+falsepositives:
+  - Container readiness probes that print network state
+  - Diagnostic scripts
+level: medium

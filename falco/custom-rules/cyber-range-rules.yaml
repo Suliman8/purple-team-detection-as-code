@@ -252,3 +252,99 @@
     [T1505.003] Web shell drop in web directory (proc=%proc.cmdline file=%fd.name pod=%k8s.pod.name)
   priority: WARNING
   tags: [persistence, T1505.003, cyber_range]
+
+
+# ─── Week 7 additions — gap-fill rules ──────────────────────────────────
+
+- rule: T1027 Base64 Decode-and-Execute Pipe
+  desc: >
+    Detects classic obfuscation pattern where attackers pipe a base64-decoded
+    payload directly into a shell — `base64 -d | sh`, `... | bash`, etc.
+    Common in dropper scripts and reverse-shell one-liners.
+  condition: >
+    spawned_process
+    and proc.name in (base64, openssl)
+    and (proc.cmdline contains "-d"
+         or proc.cmdline contains "--decode"
+         or proc.cmdline contains "enc -d")
+    and proc.pname in (sh, bash, dash, zsh, ksh)
+  output: >
+    [T1027] Base64 decode invoked under a shell (cmd=%proc.cmdline parent=%proc.pname pod=%k8s.pod.name)
+  priority: NOTICE
+  tags: [defense_evasion, T1027, cyber_range]
+
+
+- rule: T1518.001 Security Software Discovery
+  desc: >
+    Detects shell processes searching for common AV/EDR/runtime-security
+    binaries — falco, clamav, osquery, auditd, etc. Adversaries do this
+    to know what they need to evade or kill.
+  condition: >
+    spawned_process
+    and proc.name in (which, whereis, command, ps, pgrep, ls)
+    and (proc.cmdline contains "falco"
+         or proc.cmdline contains "clamav"
+         or proc.cmdline contains "clamd"
+         or proc.cmdline contains "osqueryd"
+         or proc.cmdline contains "auditd"
+         or proc.cmdline contains "ossec"
+         or proc.cmdline contains "wazuh"
+         or proc.cmdline contains "crowdstrike"
+         or proc.cmdline contains "sentinel"
+         or proc.cmdline contains "carbonblack")
+  output: >
+    [T1518.001] Security software discovery (cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: NOTICE
+  tags: [discovery, T1518.001, cyber_range]
+
+
+- rule: T1018 Remote System Discovery
+  desc: >
+    Detects ARP / network-neighbor enumeration commonly used to map
+    reachable hosts after landing on a compromised box.
+  condition: >
+    spawned_process
+    and container
+    and proc.name in (arp, arping, nmap, masscan, fping)
+  output: >
+    [T1018] Remote system discovery in container (cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: NOTICE
+  tags: [discovery, T1018, cyber_range]
+
+
+- rule: T1016 System Network Configuration Discovery
+  desc: >
+    Detects classic local network-config recon (ifconfig / ip a / route /
+    netstat) inside a container. Useful early-stage signal alongside T1059.004.
+  condition: >
+    spawned_process
+    and container
+    and (proc.name in (ifconfig, route, netstat, ss)
+         or (proc.name = ip and (proc.cmdline contains " a"
+                                 or proc.cmdline contains " addr"
+                                 or proc.cmdline contains " route"
+                                 or proc.cmdline contains " link")))
+  output: >
+    [T1016] Network configuration discovery (cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: NOTICE
+  tags: [discovery, T1016, cyber_range]
+
+
+- rule: T1082 System Information Discovery
+  desc: >
+    Detects reads of host-fingerprinting files (/etc/os-release, /proc/version,
+    /proc/cpuinfo, ...) by shell tools. Adversaries fingerprint the OS
+    to pick the right exploit / payload.
+  condition: >
+    spawned_process
+    and proc.name in (cyber_range_read_tools)
+    and (proc.cmdline contains "/etc/os-release"
+         or proc.cmdline contains "/etc/lsb-release"
+         or proc.cmdline contains "/etc/issue"
+         or proc.cmdline contains "/proc/version"
+         or proc.cmdline contains "/proc/cpuinfo"
+         or proc.cmdline contains "/proc/meminfo")
+  output: >
+    [T1082] System information discovery (cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: NOTICE
+  tags: [discovery, T1082, cyber_range]

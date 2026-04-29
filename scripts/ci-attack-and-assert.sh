@@ -20,21 +20,35 @@ set -euo pipefail
 FALCO_LOG_FILE="${FALCO_LOG_FILE:-/tmp/falco-events.log}"
 ATTACK_IMAGE="${ATTACK_IMAGE:-ubuntu:22.04}"
 
-# All 15 custom techniques we ship. Used to flag "rule fired but wasn't
+# All 20 custom techniques we ship. Used to flag "rule fired but wasn't
 # expected" — the false-positive side of the gate.
 ALL_OUR_RULES=(
-  T1003.001 T1003.008 T1053.003 T1057 T1059.004
-  T1070.002 T1070.003 T1071.001 T1083 T1098.004
-  T1136.001 T1505.003 T1548.001 T1552.004 T1611
+  T1003.001 T1003.008 T1016 T1018 T1027
+  T1053.003 T1057 T1059.004 T1070.002 T1070.003
+  T1071.001 T1082 T1083 T1098.004 T1136.001
+  T1505.003 T1518.001 T1548.001 T1552.004 T1611
 )
 
 # Techniques the attack burst below should trigger.
 EXPECTED=(
+  # Original 5 (Week 5)
   T1059.004   # whoami / id / hostname / uname
   T1003.001   # cat /etc/passwd
   T1003.008   # cat /etc/shadow
   T1057       # ps -ef
   T1083       # find / -name id_rsa
+  # Yellow -> green (Week 7)
+  T1070.003   # rm /root/.bash_history
+  T1098.004   # echo > /root/.ssh/authorized_keys
+  T1136.001   # useradd hacker
+  T1552.004   # cat /root/.ssh/id_rsa
+  T1548.001   # find . -exec ...
+  # New rules (Week 7)
+  T1027       # base64 -d | sh
+  T1518.001   # which falco
+  T1018       # arp -a
+  T1016       # ip a
+  T1082       # cat /etc/os-release
 )
 
 echo "════════════════════════════════════════════════════════════"
@@ -42,17 +56,68 @@ echo " Step 1/4 — Running attack burst in docker (${ATTACK_IMAGE})"
 echo "════════════════════════════════════════════════════════════"
 # Single docker run — one container = one set of contiguous events that
 # Falco can attribute to the same container.id.
+# Install everything we need up front, then trigger every rule in our
+# EXPECTED list. Each numbered comment maps 1:1 to an EXPECTED entry.
 docker run --rm --name ci-attack-target "${ATTACK_IMAGE}" sh -c '
   apt-get update -qq > /dev/null 2>&1 || true
-  apt-get install -y -qq procps > /dev/null 2>&1 || true
+  apt-get install -y -qq procps net-tools iproute2 iputils-arping nmap > /dev/null 2>&1 || true
+
+  # ─── Original 5 (Week 5) ─────────────────────────────────────────
+  # T1059.004 — recon commands
   whoami
   id
   hostname
   uname -a
+
+  # T1003.001 — read /etc/passwd via shell tool
   cat /etc/passwd > /dev/null
+
+  # T1003.008 — read /etc/shadow
   cat /etc/shadow > /dev/null 2>&1 || true
+
+  # T1057 — process discovery
   ps -ef > /dev/null
+
+  # T1083 — file discovery for sensitive paths
   find / -name id_rsa 2>/dev/null > /dev/null || true
+
+  # ─── Yellow → green (Week 7) ─────────────────────────────────────
+  # T1070.003 — bash history tampering (truncate satisfies the rule)
+  touch /root/.bash_history
+  rm /root/.bash_history
+
+  # T1098.004 — authorized_keys modification (add a fake attacker key)
+  mkdir -p /root/.ssh
+  echo "ssh-rsa AAAAfake== attacker@example" > /root/.ssh/authorized_keys
+
+  # T1136.001 — local account creation inside the container
+  useradd ci-test-account 2>/dev/null || true
+
+  # T1552.004 — read of an SSH private key by non-SSH tool (cat)
+  echo "fake-key-material" > /root/.ssh/id_rsa
+  chmod 600 /root/.ssh/id_rsa
+  cat /root/.ssh/id_rsa > /dev/null
+
+  # T1548.001 — SUID-abuse pattern (find -exec is the canonical GTFOBin)
+  find . -maxdepth 1 -exec ls {} \; > /dev/null 2>&1 || true
+
+  # ─── New rules (Week 7) ──────────────────────────────────────────
+  # T1027 — base64 decode-and-execute pipe (under bash so parent matches)
+  echo "ZWNobyB0MTAyN190ZXN0Cg==" | base64 -d | sh > /dev/null
+
+  # T1518.001 — security software discovery
+  which falco 2>/dev/null || true
+  which clamav 2>/dev/null || true
+
+  # T1018 — remote system discovery
+  arp -a > /dev/null 2>&1 || true
+
+  # T1016 — network configuration discovery
+  ip a > /dev/null 2>&1 || true
+  ifconfig > /dev/null 2>&1 || true
+
+  # T1082 — system information discovery
+  cat /etc/os-release > /dev/null
 '
 
 echo ""

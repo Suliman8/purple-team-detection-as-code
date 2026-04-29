@@ -1,0 +1,40 @@
+title: System Information Discovery via Fingerprinting Files
+id: 7c9d2e8b-3a4f-4f1a-8b2c-9c6e7b3f1f05
+status: experimental
+description: |
+  Detects reads of host-fingerprinting files (/etc/os-release, /proc/version,
+  /proc/cpuinfo, ...) by shell tools (cat, grep, head, ...). Adversaries
+  fingerprint the OS to pick the right exploit / payload.
+references:
+  - https://attack.mitre.org/techniques/T1082/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.discovery
+  - attack.t1082
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_read_tool:
+    Image|endswith:
+      - '/cat'
+      - '/less'
+      - '/more'
+      - '/head'
+      - '/tail'
+      - '/grep'
+      - '/awk'
+  selection_fingerprint_files:
+    CommandLine|contains:
+      - '/etc/os-release'
+      - '/etc/lsb-release'
+      - '/etc/issue'
+      - '/proc/version'
+      - '/proc/cpuinfo'
+      - '/proc/meminfo'
+  condition: selection_read_tool and selection_fingerprint_files
+falsepositives:
+  - Container init scripts that log OS info on boot
+  - Health-check endpoints
+level: medium

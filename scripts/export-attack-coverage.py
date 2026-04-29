@@ -35,11 +35,24 @@ OUT_FILE  = PROJECT_ROOT / "dist" / "attack-coverage.json"
 # Techniques the Purple Team CI workflow actively asserts on every run
 # (kept in sync with EXPECTED in scripts/ci-attack-and-assert.sh).
 VERIFIED = {
+    # Original 5 (Week 5)
     "T1003.001",   # cat /etc/passwd
     "T1003.008",   # cat /etc/shadow
     "T1057",       # ps -ef
     "T1059.004",   # whoami / id / hostname / uname
     "T1083",       # find / -name id_rsa
+    # Yellow -> green (Week 7)
+    "T1070.003",   # rm /root/.bash_history
+    "T1098.004",   # echo > /root/.ssh/authorized_keys
+    "T1136.001",   # useradd hacker
+    "T1552.004",   # cat /root/.ssh/id_rsa
+    "T1548.001",   # find . -exec ...
+    # New rules (Week 7) — verified at birth
+    "T1027",       # base64 -d | sh
+    "T1518.001",   # which falco
+    "T1018",       # arp -a
+    "T1016",       # ip a
+    "T1082",       # cat /etc/os-release
 }
 
 GREEN  = "#2ecc71"   # rule exists AND verified in CI

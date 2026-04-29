@@ -74,14 +74,15 @@ fi
 LINES=$(wc -l < "${FALCO_LOG_FILE}")
 echo "  Total log lines: ${LINES}"
 
-# Use jq to pull each event's `rule` field — proper JSON parsing avoids
-# brittleness with regex (e.g. when an `output` string also contains
-# brackets like "[T1083]" which a grep regex could mismatch).
-# `--raw-output` strips JSON quoting; `select(.rule != null)` skips
-# any non-event lines (e.g. Falco's startup info messages).
-FIRED_RULES=$(jq -r 'select(.rule != null) | .rule' "${FALCO_LOG_FILE}" 2>/dev/null \
+# Falco's log file mixes plain-text startup messages with one-JSON-per-line
+# events. Pre-filter to lines starting with `{` before handing to jq —
+# without this, jq errors on the first non-JSON line and pipefail aborts
+# the whole script. `|| true` on the grep covers the "no JSON yet" case
+# without crashing.
+FIRED_RULES=$( (grep -E '^\{' "${FALCO_LOG_FILE}" || true) \
+  | jq -r 'select(.rule != null) | .rule' \
   | grep -E '^T[0-9]+(\.[0-9]+)?( |$)' \
-  | sort -u)
+  | sort -u || true)
 
 # Extract just the technique IDs (first whitespace-delimited token).
 FIRED_TECHS=$(echo "${FIRED_RULES}" | awk '{print $1}' | sort -u)

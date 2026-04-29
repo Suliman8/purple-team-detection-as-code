@@ -122,7 +122,11 @@
 
 
 - rule: T1053.003 Cron Job Modification
-  desc: Detects writes to cron-related paths for persistence.
+  desc: >
+    Detects writes to cron-related paths for persistence. Excludes
+    package managers AND any process whose ancestry chain includes
+    a package manager (postinst scripts, dpkg-divert, update-alternatives,
+    etc.) — these legitimately drop cron files during apt installs.
   condition: >
     open_write
     and (fd.name startswith "/etc/crontab"
@@ -132,7 +136,11 @@
          or fd.name startswith "/etc/cron.weekly/"
          or fd.name startswith "/etc/cron.monthly/"
          or fd.name startswith "/var/spool/cron/")
-    and not proc.name in (cyber_range_pkg_managers)
+    and not (proc.name in (cyber_range_pkg_managers)
+             or proc.aname[1] in (cyber_range_pkg_managers)
+             or proc.aname[2] in (cyber_range_pkg_managers)
+             or proc.aname[3] in (cyber_range_pkg_managers)
+             or proc.aname[4] in (cyber_range_pkg_managers))
   output: >
     [T1053.003] Cron persistence write (proc=%proc.cmdline file=%fd.name pod=%k8s.pod.name)
   priority: WARNING

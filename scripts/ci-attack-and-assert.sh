@@ -57,9 +57,9 @@ docker run --rm --name ci-attack-target "${ATTACK_IMAGE}" sh -c '
 
 echo ""
 echo "════════════════════════════════════════════════════════════"
-echo " Step 2/4 — Waiting 8s for Falco to flush events to log file"
+echo " Step 2/4 — Waiting 12s for Falco to flush events to log file"
 echo "════════════════════════════════════════════════════════════"
-sleep 8
+sleep 12
 
 echo ""
 echo "════════════════════════════════════════════════════════════"
@@ -75,12 +75,11 @@ LINES=$(wc -l < "${FALCO_LOG_FILE}")
 echo "  Total log lines: ${LINES}"
 
 # Falco's log file mixes plain-text startup messages with one-JSON-per-line
-# events. Pre-filter to lines starting with `{` before handing to jq —
-# without this, jq errors on the first non-JSON line and pipefail aborts
-# the whole script. `|| true` on the grep covers the "no JSON yet" case
-# without crashing.
-FIRED_RULES=$( (grep -E '^\{' "${FALCO_LOG_FILE}" || true) \
-  | jq -r 'select(.rule != null) | .rule' \
+# events, and the very last line may be partially written if Falco hasn't
+# flushed yet. Read each line as a raw string and try to parse — invalid
+# or incomplete lines become `empty` and are silently skipped.
+FIRED_RULES=$(jq -R -r 'try fromjson catch empty | select(.rule != null) | .rule' \
+  "${FALCO_LOG_FILE}" \
   | grep -E '^T[0-9]+(\.[0-9]+)?( |$)' \
   | sort -u || true)
 

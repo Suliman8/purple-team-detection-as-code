@@ -85,7 +85,12 @@ jobs:
           # flag needed for that.
           sudo touch "${FALCO_LOG_FILE}"
           sudo chmod 666 "${FALCO_LOG_FILE}"
-          sudo nohup falco \
+          # `stdbuf -oL` forces line-buffering on Falco's stdout. Without
+          # this, libc block-buffers when stdout points at a file, and
+          # complete events sit in the Falco process's memory until the
+          # 4KiB buffer fills. The assertion step then reads a half-
+          # written final line and jq dies with "Unfinished string at EOF".
+          sudo nohup stdbuf -oL falco \
             -o rule_matching=all \
             -o json_output=true \
             -o json_include_output_property=true \

@@ -59,15 +59,25 @@ jobs:
 
       # Helm = the k8s package manager. Falco's official chart wires up
       # the DaemonSet, RBAC, ConfigMap, and the eBPF probe.
+      # Pin chart version so a fresh Falco release doesn't break CI
+      # without warning. Bump deliberately, with a PR.
       - name: Install Falco via Helm
+        env:
+          FALCO_CHART_VERSION: "4.16.0"
         run: |
           helm repo add falcosecurity https://falcosecurity.github.io/charts
           helm repo update
           kubectl create namespace falco
+          # Single-quote the --set-file arg so the backslash that escapes
+          # the dot in `cyber-range-rules.yaml` survives bash word-splitting
+          # and reaches Helm intact. Without this, the dot is interpreted
+          # as a nested-key separator and the chart template errors with
+          # "expected string; got map[string]interface {}".
           helm install falco falcosecurity/falco \
+            --version "${FALCO_CHART_VERSION}" \
             -n falco \
             -f falco/values.yaml \
-            --set-file customRules.cyber-range-rules\.yaml=falco/custom-rules/cyber-range-rules.yaml \
+            --set-file 'customRules.cyber-range-rules\.yaml=falco/custom-rules/cyber-range-rules.yaml' \
             --wait \
             --timeout=5m
 

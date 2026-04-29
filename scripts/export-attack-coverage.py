@@ -89,7 +89,10 @@ def main() -> int:
     layer = {
         "name": "Purple-Team Detection Coverage",
         "versions": {
-            "attack": "15",
+            # Bump in lockstep with what mitre-attack.github.io renders.
+            # When Navigator shows a "Layer Upgrade vN -> vM" prompt on
+            # upload, set this to M to silence it on future exports.
+            "attack": "17",
             "navigator": "5.1.0",
             "layer": "4.5",
         },

@@ -75,16 +75,17 @@ jobs:
 
       - name: Start Falco in background, capturing stdout to log file
         run: |
-          # -A enables all rules; -o rule_matching=all matches our
-          # production setting (see falco/values.yaml — required so
-          # custom rules aren't suppressed by built-ins firing first).
+          # -o rule_matching=all matches our production setting (see
+          # falco/values.yaml — required so custom rules aren't
+          # suppressed by built-ins firing first).
           # -o engine.kind=modern_ebpf forces the modern eBPF driver,
           # which works on the bare GHA host kernel (the case we lacked
           # in the kind setup).
+          # All rules in /etc/falco/rules.d/ load automatically — no
+          # flag needed for that.
           sudo touch "${FALCO_LOG_FILE}"
           sudo chmod 666 "${FALCO_LOG_FILE}"
           sudo nohup falco \
-            -A \
             -o rule_matching=all \
             -o json_output=true \
             -o json_include_output_property=true \

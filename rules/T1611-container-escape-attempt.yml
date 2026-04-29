@@ -1,0 +1,38 @@
+title: Container Escape Attempt - Host Mount Access
+id: f5af7deb-0f7f-4fbf-efcf-9c6e7b3f20cd
+status: experimental
+description: |
+  Detects access to host filesystem indicators from within a container:
+  reads of /proc/1/root, /host/, mounted Docker socket, or release_agent
+  paths used for cgroup escape. Strong signal of container escape attempt.
+references:
+  - https://attack.mitre.org/techniques/T1611/
+  - https://blog.trailofbits.com/2019/07/19/understanding-docker-container-escapes/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.privilege-escalation
+  - attack.t1611
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection_host_paths:
+    TargetFilename|contains:
+      - '/proc/1/root'
+      - '/host/'
+      - '/var/run/docker.sock'
+      - '/run/docker.sock'
+      - '/sys/fs/cgroup/release_agent'
+      - '/proc/sys/kernel/core_pattern'
+  filter_cluster_metadata:
+    Image|endswith:
+      - '/runc'
+      - '/containerd'
+      - '/dockerd'
+      - '/kubelet'
+  condition: selection_host_paths and not filter_cluster_metadata
+falsepositives:
+  - Privileged debugging containers (rare)
+  - Container runtime self-inspection
+level: critical

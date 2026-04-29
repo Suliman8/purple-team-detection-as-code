@@ -1,0 +1,40 @@
+title: Search For SSH Private Keys
+id: a05f8296-bf2f-4f6e-9f7f-9c6e7b3f1d7e
+status: experimental
+description: |
+  Detects access to SSH private key files (id_rsa, id_ecdsa, id_ed25519) by
+  shell processes or non-SSH tooling. Stealing SSH keys enables lateral
+  movement to other systems.
+references:
+  - https://attack.mitre.org/techniques/T1552/004/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.credential-access
+  - attack.t1552.004
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection_ssh_keys:
+    TargetFilename|contains:
+      - '/.ssh/id_rsa'
+      - '/.ssh/id_dsa'
+      - '/.ssh/id_ecdsa'
+      - '/.ssh/id_ed25519'
+      - '/.ssh/identity'
+  filter_ssh_legit:
+    Image|endswith:
+      - '/ssh'
+      - '/sshd'
+      - '/ssh-add'
+      - '/ssh-agent'
+      - '/scp'
+      - '/sftp'
+      - '/rsync'
+      - '/git'
+  condition: selection_ssh_keys and not filter_ssh_legit
+falsepositives:
+  - Backup tools enumerating ~/.ssh
+  - Configuration management tools (ansible, salt)
+level: high

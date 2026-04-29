@@ -1,0 +1,254 @@
+- list: cyber_range_legitimate_passwd_tools
+  items: [sudo, passwd, login, sshd, su, chage, usermod, dpkg, apt, apt-get, unattended-upgrade]
+
+- list: cyber_range_legitimate_ssh_tools
+  items: [ssh, sshd, ssh-add, ssh-agent, scp, sftp, rsync, git]
+
+- list: cyber_range_pkg_managers
+  items: [dpkg, apt, apt-get, yum, dnf, rpm]
+
+- list: cyber_range_destructive_tools
+  items: [rm, shred, truncate, dd]
+
+- list: cyber_range_recon_tools
+  items: [whoami, id, hostname, uname, w, who]
+
+- list: cyber_range_proc_tools
+  items: [ps, top, htop, pgrep, pidof]
+
+- list: cyber_range_read_tools
+  items: [cat, less, more, head, tail, grep, awk, cut]
+
+- list: cyber_range_useradd_tools
+  items: [useradd, adduser, newusers]
+
+
+- rule: T1003.008 Suspicious Read of /etc/shadow
+  desc: Detects /etc/shadow read by a process not in the legitimate-tools allowlist (credential theft).
+  condition: >
+    open_read
+    and fd.name in ("/etc/shadow")
+    and not proc.name in (cyber_range_legitimate_passwd_tools)
+  output: >
+    [T1003.008] Sensitive file read (user=%user.name proc=%proc.cmdline file=%fd.name pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [credential_access, T1003.008, cyber_range]
+
+
+- rule: T1003.001 Read of /etc/passwd From Shell Tool
+  desc: Detects shell read tools (cat, grep, ...) reading /etc/passwd, indicating recon.
+  condition: >
+    spawned_process
+    and proc.name in (cyber_range_read_tools)
+    and proc.cmdline contains "/etc/passwd"
+  output: >
+    [T1003.001] /etc/passwd read via shell (user=%user.name cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: NOTICE
+  tags: [credential_access, discovery, T1003.001, cyber_range]
+
+
+- rule: T1059.004 Bash Reconnaissance Commands
+  desc: Detects classic post-exploitation recon commands (whoami, id, hostname, ...) inside containers.
+  condition: >
+    spawned_process
+    and container
+    and proc.name in (cyber_range_recon_tools)
+  output: >
+    [T1059.004] Recon command in container (user=%user.name proc=%proc.cmdline pod=%k8s.pod.name)
+  priority: NOTICE
+  tags: [execution, discovery, T1059.004, T1033, cyber_range]
+
+
+- rule: T1057 Process Discovery via ps/top
+  desc: Detects full process listings (ps -ef, ps aux) inside a container — common post-exploit step.
+  condition: >
+    spawned_process
+    and container
+    and proc.name in (cyber_range_proc_tools)
+    and (proc.cmdline contains "-ef" or proc.cmdline contains "-aux" or proc.cmdline contains "auxww")
+  output: >
+    [T1057] Process discovery in container (user=%user.name cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: NOTICE
+  tags: [discovery, T1057, cyber_range]
+
+
+- rule: T1083 Suspicious File Discovery via find
+  desc: Detects find/locate commands targeting credential-bearing files (id_rsa, .env, .aws, ...).
+  condition: >
+    spawned_process
+    and proc.name in (find, locate)
+    and (proc.cmdline contains "id_rsa"
+         or proc.cmdline contains "id_dsa"
+         or proc.cmdline contains ".pem"
+         or proc.cmdline contains ".env"
+         or proc.cmdline contains "password"
+         or proc.cmdline contains "credentials"
+         or proc.cmdline contains ".aws"
+         or proc.cmdline contains ".kube"
+         or proc.cmdline contains "wp-config"
+         or proc.cmdline contains ".npmrc")
+  output: >
+    [T1083] File discovery for sensitive paths (cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [discovery, T1083, cyber_range]
+
+
+- rule: T1552.004 Search For SSH Private Keys
+  desc: Detects access to ~/.ssh/id_* private keys by non-SSH tooling.
+  condition: >
+    open_read
+    and (fd.name contains "/.ssh/id_rsa"
+         or fd.name contains "/.ssh/id_dsa"
+         or fd.name contains "/.ssh/id_ecdsa"
+         or fd.name contains "/.ssh/id_ed25519"
+         or fd.name contains "/.ssh/identity")
+    and not proc.name in (cyber_range_legitimate_ssh_tools)
+  output: >
+    [T1552.004] SSH private key access by non-SSH tool (proc=%proc.cmdline file=%fd.name pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [credential_access, T1552.004, cyber_range]
+
+
+- rule: T1098.004 SSH authorized_keys Modification
+  desc: Detects writes to authorized_keys files - a common Linux persistence technique.
+  condition: >
+    open_write
+    and fd.name contains "/.ssh/authorized_keys"
+    and not proc.name in (ssh-copy-id, sshd, ansible-ssh)
+  output: >
+    [T1098.004] authorized_keys modified (user=%user.name proc=%proc.cmdline file=%fd.name pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [persistence, T1098.004, cyber_range]
+
+
+- rule: T1053.003 Cron Job Modification
+  desc: Detects writes to cron-related paths for persistence.
+  condition: >
+    open_write
+    and (fd.name startswith "/etc/crontab"
+         or fd.name startswith "/etc/cron.d/"
+         or fd.name startswith "/etc/cron.daily/"
+         or fd.name startswith "/etc/cron.hourly/"
+         or fd.name startswith "/etc/cron.weekly/"
+         or fd.name startswith "/etc/cron.monthly/"
+         or fd.name startswith "/var/spool/cron/")
+    and not proc.name in (cyber_range_pkg_managers)
+  output: >
+    [T1053.003] Cron persistence write (proc=%proc.cmdline file=%fd.name pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [persistence, privilege_escalation, T1053.003, cyber_range]
+
+
+- rule: T1136.001 Local Account Creation
+  desc: Detects useradd/adduser inside containers - persistence via new account.
+  condition: >
+    spawned_process
+    and container
+    and proc.name in (cyber_range_useradd_tools)
+  output: >
+    [T1136.001] User account created in container (cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [persistence, T1136.001, cyber_range]
+
+
+- rule: T1548.001 Suspicious SUID Binary Use
+  desc: Detects SUID-abuse pattern (find -exec, vim/awk shell escape, python os.system).
+  condition: >
+    spawned_process
+    and proc.name in (find, vim, nmap, awk, python, python3, perl, ruby, less, more, man)
+    and (proc.cmdline contains "-exec"
+         or proc.cmdline contains "os.system"
+         or proc.cmdline contains "system("
+         or proc.cmdline contains "!/bin/"
+         or proc.cmdline contains "!sh"
+         or proc.cmdline contains "!bash")
+  output: >
+    [T1548.001] Possible SUID abuse (cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [privilege_escalation, defense_evasion, T1548.001, cyber_range]
+
+
+- rule: T1611 Container Escape via Host Mount
+  desc: >
+    Detects WRITES to host filesystem indicators from a container or shell-launched
+    reads of the Docker socket / cgroup release_agent. Read-only access to /proc/1
+    is excluded (extremely noisy from runtime introspection).
+  condition: >
+    container
+    and (
+      (open_write and (fd.name = "/sys/fs/cgroup/release_agent"
+                       or fd.name = "/proc/sys/kernel/core_pattern"))
+      or
+      (open_read and proc.name in (cat, sh, bash, dash, curl, wget, python, python3)
+                 and (fd.name = "/var/run/docker.sock"
+                      or fd.name = "/run/docker.sock"))
+    )
+  output: >
+    [T1611] Container escape attempt (proc=%proc.cmdline file=%fd.name pod=%k8s.pod.name)
+  priority: CRITICAL
+  tags: [privilege_escalation, T1611, cyber_range]
+
+
+- rule: T1070.003 Bash History Tampering
+  desc: Detects deletion or truncation of shell history files.
+  condition: >
+    spawned_process
+    and proc.name in (cyber_range_destructive_tools)
+    and (proc.cmdline contains ".bash_history"
+         or proc.cmdline contains ".zsh_history"
+         or proc.cmdline contains ".python_history"
+         or proc.cmdline contains ".mysql_history")
+  output: >
+    [T1070.003] Shell history tampering (cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [defense_evasion, T1070.003, cyber_range]
+
+
+- rule: T1070.002 Log File Deletion
+  desc: Detects rm/shred/truncate against /var/log/ paths - log evidence wipe.
+  condition: >
+    spawned_process
+    and proc.name in (cyber_range_destructive_tools)
+    and (proc.cmdline contains "/var/log/"
+         or proc.cmdline contains "/var/lib/audit/")
+  output: >
+    [T1070.002] Log files being deleted (cmd=%proc.cmdline pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [defense_evasion, T1070.002, cyber_range]
+
+
+- rule: T1071.001 HTTP Beacon to Uncommon Port
+  desc: Detects outbound TCP to uncommon C2-like ports (4444, 5555, Caldera ports etc.).
+  condition: >
+    outbound
+    and (fd.sport in (4444, 5555, 6666, 7010, 7011, 7012, 8443, 8853, 8888)
+         or fd.cport in (4444, 5555, 6666, 7010, 7011, 7012, 8443, 8853, 8888))
+  output: >
+    [T1071.001] HTTP/TCP beacon to uncommon port (proc=%proc.cmdline conn=%fd.name pod=%k8s.pod.name)
+  priority: NOTICE
+  tags: [command_and_control, T1071.001, cyber_range]
+
+
+- rule: T1505.003 Web Shell Drop
+  desc: Detects script files (.php/.jsp/.aspx) being written to web-server directories.
+  condition: >
+    open_write
+    and (fd.name startswith "/var/www/"
+         or fd.name startswith "/usr/share/nginx/html/"
+         or fd.name startswith "/usr/local/apache2/htdocs/"
+         or fd.name startswith "/opt/app/public/"
+         or fd.name startswith "/srv/www/")
+    and (fd.name endswith ".php"
+         or fd.name endswith ".php3"
+         or fd.name endswith ".php5"
+         or fd.name endswith ".phtml"
+         or fd.name endswith ".jsp"
+         or fd.name endswith ".jspx"
+         or fd.name endswith ".aspx"
+         or fd.name endswith ".cgi"
+         or fd.name endswith ".pl")
+    and not proc.name in (dpkg, apt, apt-get, yum, composer, git)
+  output: >
+    [T1505.003] Web shell drop in web directory (proc=%proc.cmdline file=%fd.name pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [persistence, T1505.003, cyber_range]

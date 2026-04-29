@@ -1,0 +1,39 @@
+title: Suspicious File Discovery via Find
+id: 8e3f6074-9d0f-4f4e-9d5e-9c6e7b3f1d5c
+status: experimental
+description: |
+  Detects use of the find command searching for sensitive file types or locations
+  (config files, key files, .env files, password files). A standard
+  attacker reconnaissance pattern after gaining a foothold.
+references:
+  - https://attack.mitre.org/techniques/T1083/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.discovery
+  - attack.t1083
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_find:
+    Image|endswith:
+      - '/find'
+      - '/locate'
+  selection_sensitive_targets:
+    CommandLine|contains:
+      - 'id_rsa'
+      - 'id_dsa'
+      - '.pem'
+      - '.env'
+      - 'password'
+      - 'credentials'
+      - '.aws'
+      - '.kube'
+      - 'wp-config'
+      - '.npmrc'
+  condition: selection_find and selection_sensitive_targets
+falsepositives:
+  - Backup tools enumerating user homes
+  - Compliance scanners
+level: high

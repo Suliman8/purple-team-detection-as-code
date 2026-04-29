@@ -1,0 +1,35 @@
+title: Process Discovery Tools In Container
+id: 7d2e5f63-8c9f-4f3e-9c4e-9c6e7b3f1d4b
+status: experimental
+description: |
+  Detects use of process enumeration tools (ps, top, htop, pgrep) inside a container.
+  Containers usually run a single workload — broad process listings are abnormal and
+  a common post-exploitation step (find security tools, find creds in env vars).
+references:
+  - https://attack.mitre.org/techniques/T1057/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.discovery
+  - attack.t1057
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_proc_tools:
+    Image|endswith:
+      - '/ps'
+      - '/top'
+      - '/htop'
+      - '/pgrep'
+      - '/pidof'
+  selection_full_listing:
+    CommandLine|contains:
+      - '-ef'
+      - '-aux'
+      - 'auxww'
+  condition: selection_proc_tools and selection_full_listing
+falsepositives:
+  - Monitoring agents listing processes
+  - Debug containers used by SREs
+level: medium

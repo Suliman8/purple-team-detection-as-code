@@ -1,0 +1,41 @@
+title: Suspicious Read of /etc/shadow
+id: 5b0c3c41-6a8e-4f1d-9a2c-9c6e7b3f1d2e
+status: experimental
+description: |
+  Detects when a process opens /etc/shadow for reading. /etc/shadow contains
+  password hashes and should only be read by root-owned utilities like sudo,
+  passwd, login, sshd, or system update tools.
+  Reading this file from a shell or interactive process is a strong indicator
+  of credential theft attempts.
+references:
+  - https://attack.mitre.org/techniques/T1003/008/
+  - https://github.com/SigmaHQ/sigma/blob/master/rules/linux/file_event/file_event_lnx_etc_shadow.yml
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.credential-access
+  - attack.t1003.008
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection_target:
+    TargetFilename: '/etc/shadow'
+  filter_legitimate:
+    Image|endswith:
+      - '/sudo'
+      - '/passwd'
+      - '/login'
+      - '/sshd'
+      - '/su'
+      - '/chage'
+      - '/usermod'
+      - '/dpkg'
+      - '/apt'
+      - '/apt-get'
+      - '/unattended-upgrade'
+  condition: selection_target and not filter_legitimate
+falsepositives:
+  - System administration tools not in the filter list
+  - Custom backup or audit scripts running as root
+level: high

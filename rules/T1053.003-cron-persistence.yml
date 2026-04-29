@@ -1,0 +1,41 @@
+title: Cron Job Modification For Persistence
+id: c27fa4b8-df4f-4f8e-bf9f-9c6e7b3f1d9a
+status: experimental
+description: |
+  Detects writes to cron-related files (/etc/crontab, /etc/cron.d/, user
+  crontabs in /var/spool/cron/). Adding entries here lets attackers run
+  arbitrary commands on a schedule — extremely common Linux persistence.
+references:
+  - https://attack.mitre.org/techniques/T1053/003/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.persistence
+  - attack.privilege-escalation
+  - attack.t1053.003
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection_cron_paths:
+    TargetFilename|startswith:
+      - '/etc/crontab'
+      - '/etc/cron.d/'
+      - '/etc/cron.daily/'
+      - '/etc/cron.hourly/'
+      - '/etc/cron.weekly/'
+      - '/etc/cron.monthly/'
+      - '/var/spool/cron/'
+  filter_pkg_managers:
+    Image|endswith:
+      - '/dpkg'
+      - '/apt'
+      - '/apt-get'
+      - '/yum'
+      - '/dnf'
+      - '/rpm'
+  condition: selection_cron_paths and not filter_pkg_managers
+falsepositives:
+  - Package managers installing scheduled jobs
+  - Configuration management writes
+level: high

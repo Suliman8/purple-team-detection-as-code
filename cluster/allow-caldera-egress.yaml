@@ -1,0 +1,27 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-caldera-egress
+  namespace: cyber-range
+  annotations:
+    description: "Allows compromised-host pods to beacon back to Caldera C2 server on kind Docker network"
+spec:
+  podSelector:
+    matchLabels:
+      role: attacker-agent
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 172.20.0.0/16
+      ports:
+        - protocol: TCP
+          port: 8888
+        - protocol: TCP
+          port: 7010
+        - protocol: UDP
+          port: 7011
+        - protocol: TCP
+          port: 7012

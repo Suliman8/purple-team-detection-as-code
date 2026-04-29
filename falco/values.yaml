@@ -1,0 +1,68 @@
+driver:
+  enabled: true
+  kind: modern_ebpf
+
+falco:
+  json_output: true
+  json_include_output_property: true
+  json_include_tags_property: true
+
+  log_level: info
+  priority: debug
+
+  rule_matching: all
+
+  watch_config_files: false
+
+  stdout_output:
+    enabled: true
+
+  file_output:
+    enabled: false
+
+  http_output:
+    enabled: false
+
+  syscall_event_drops:
+    threshold: 0.1
+    actions:
+      - log
+      - alert
+
+tty: true
+
+collectors:
+  enabled: true
+  kubernetes:
+    enabled: true
+  containerEngine:
+    engines:
+      docker:
+        enabled: true
+      containerd:
+        enabled: true
+        sockets:
+          - /run/containerd/containerd.sock
+
+falcoctl:
+  artifact:
+    install:
+      enabled: true
+    follow:
+      enabled: false
+  config:
+    artifact:
+      install:
+        refs:
+          - falco-rules:3
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi
+
+serviceMonitor:
+  create: false

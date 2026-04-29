@@ -1,0 +1,50 @@
+title: Web Shell File Drop in Web-Accessible Directory
+id: 39ef0a1f-4fcf-4fff-2f0f-9c6e7b3f240b
+status: experimental
+description: |
+  Detects creation of script files (.php, .jsp, .aspx, .cgi) in
+  web-server-accessible directories. Common after exploiting a file
+  upload bug. The dropped file becomes a persistent backdoor.
+references:
+  - https://attack.mitre.org/techniques/T1505/003/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.persistence
+  - attack.t1505.003
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection_webdir:
+    TargetFilename|startswith:
+      - '/var/www/'
+      - '/usr/share/nginx/html/'
+      - '/usr/local/apache2/htdocs/'
+      - '/opt/app/public/'
+      - '/srv/www/'
+  selection_script_ext:
+    TargetFilename|endswith:
+      - '.php'
+      - '.php3'
+      - '.php5'
+      - '.phtml'
+      - '.jsp'
+      - '.jspx'
+      - '.aspx'
+      - '.cgi'
+      - '.pl'
+  filter_pkg_install:
+    Image|endswith:
+      - '/dpkg'
+      - '/apt'
+      - '/apt-get'
+      - '/yum'
+      - '/composer'
+      - '/git'
+  condition: selection_webdir and selection_script_ext and not filter_pkg_install
+falsepositives:
+  - CMS plugin installation
+  - Application deployments
+  - Composer/git pulling new code
+level: high

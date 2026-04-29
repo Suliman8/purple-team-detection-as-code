@@ -1,0 +1,46 @@
+title: Suspicious Use of SUID Binary
+id: e49fc6da-ff6f-4faf-dfbf-9c6e7b3f1fbc
+status: experimental
+description: |
+  Detects execution of binaries that have the SUID bit set, run as root
+  while invoked by a non-root user. Classic Linux privilege escalation:
+  abuse a SUID binary (e.g., misconfigured nmap, vim, find) to gain root.
+references:
+  - https://attack.mitre.org/techniques/T1548/001/
+  - https://gtfobins.github.io/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.privilege-escalation
+  - attack.defense-evasion
+  - attack.t1548.001
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_suid_abuse:
+    Image|endswith:
+      - '/find'
+      - '/vim'
+      - '/nmap'
+      - '/awk'
+      - '/python'
+      - '/python3'
+      - '/perl'
+      - '/ruby'
+      - '/less'
+      - '/more'
+      - '/man'
+  selection_suspicious_args:
+    CommandLine|contains:
+      - '-exec'
+      - 'os.system'
+      - 'system('
+      - '!/bin/'
+      - '!sh'
+      - '!bash'
+  condition: selection_suid_abuse and selection_suspicious_args
+falsepositives:
+  - Developers using `vim !sh` for shortcut
+  - find with legitimate -exec
+level: high

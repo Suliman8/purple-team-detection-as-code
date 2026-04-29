@@ -1,0 +1,30 @@
+title: SSH authorized_keys File Modification
+id: b16f93a7-cf3f-4f7e-af8f-9c6e7b3f1d8f
+status: experimental
+description: |
+  Detects writes to ~/.ssh/authorized_keys files. Adding an SSH public key
+  to this file gives the attacker permanent passwordless access to the host.
+  Persistence technique used by virtually every Linux compromise.
+references:
+  - https://attack.mitre.org/techniques/T1098/004/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.persistence
+  - attack.t1098.004
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection_authkeys_write:
+    TargetFilename|contains: '/.ssh/authorized_keys'
+  filter_legitimate:
+    Image|endswith:
+      - '/ssh-copy-id'
+      - '/sshd'
+      - '/ansible-ssh'
+  condition: selection_authkeys_write and not filter_legitimate
+falsepositives:
+  - Configuration management deployment of keys
+  - User running ssh-copy-id manually
+level: high

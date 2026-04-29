@@ -1,0 +1,39 @@
+title: Bash History Tampering or Clearing
+id: 06bf8efc-1f8f-4fcf-ffdf-9c6e7b3f21de
+status: experimental
+description: |
+  Detects deletion of, truncation of, or unsetting of HISTFILE for
+  ~/.bash_history. Classic post-exploitation cleanup to hide attacker activity.
+references:
+  - https://attack.mitre.org/techniques/T1070/003/
+author: Suliman Khalid Noor
+date: 2026-04-29
+tags:
+  - attack.defense-evasion
+  - attack.t1070.003
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_history_files:
+    CommandLine|contains:
+      - '.bash_history'
+      - '.zsh_history'
+      - '.python_history'
+      - '.mysql_history'
+      - 'HISTFILE'
+      - 'HISTSIZE=0'
+  selection_destructive:
+    Image|endswith:
+      - '/rm'
+      - '/shred'
+      - '/truncate'
+      - '/dd'
+      - '/echo'
+      - '/unset'
+      - '/export'
+  condition: selection_history_files and selection_destructive
+falsepositives:
+  - User legitimately clearing their history
+  - System cleanup scripts
+level: high

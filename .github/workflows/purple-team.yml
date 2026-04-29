@@ -73,10 +73,14 @@ jobs:
           # and reaches Helm intact. Without this, the dot is interpreted
           # as a nested-key separator and the chart template errors with
           # "expected string; got map[string]interface {}".
+          # Helm merges -f files left-to-right. values-ci.yaml overrides
+          # the production driver setting (modern_ebpf -> ebpf) for the
+          # reasons documented in falco/values-ci.yaml.
           helm install falco falcosecurity/falco \
             --version "${FALCO_CHART_VERSION}" \
             -n falco \
             -f falco/values.yaml \
+            -f falco/values-ci.yaml \
             --set-file 'customRules.cyber-range-rules\.yaml=falco/custom-rules/cyber-range-rules.yaml' \
             --wait \
             --timeout=5m

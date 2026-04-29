@@ -1,0 +1,18 @@
+# CI-only overrides for Falco's Helm chart, layered on top of values.yaml.
+#
+# Why this file exists:
+# Production Kali boxes use the `modern_ebpf` driver (CO-RE BTF eBPF probe,
+# fastest + lowest overhead). On GitHub Actions Ubuntu runners — which are
+# Azure VMs with a hardened kernel, running kind clusters in Docker — the
+# modern_ebpf driver fails to initialize:
+#
+#   Opening 'syscall' source with modern BPF probe.
+#   An error occurred in an event source, forcing termination...
+#   Error: Initialization issues during scap_init
+#
+# The legacy `ebpf` driver (BCC-style) is more permissive about kernel
+# features and works reliably in nested-container CI. We accept the small
+# perf hit because CI runs ~5 minutes total — not a 24/7 production workload.
+
+driver:
+  kind: ebpf

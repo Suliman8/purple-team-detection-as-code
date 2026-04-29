@@ -1,0 +1,9 @@
+# pySigma toolchain — pinned to versions verified locally on Kali.
+# Used by both developers (`pip install -r requirements.txt`) and the
+# `Rules CI` workflow (.github/workflows/rules-ci.yml).
+
+sigma-cli==3.0.2
+pySigma==1.3.3
+pySigma-backend-elasticsearch==2.0.2  # provides eql + lucene
+pysigma-backend-splunk==2.1.0         # provides spl
+pySigma-backend-loki==0.13.0          # provides logql

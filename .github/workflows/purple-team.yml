@@ -1,0 +1,124 @@
+name: Purple Team — live attack & detect
+
+# Triggers:
+#   - PR / push to main: re-validate detection coverage when rules or
+#     Falco config change. Skips on docs-only PRs (paths filter).
+#   - Manual dispatch: handy when reproducing a failure locally.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'rules/**'
+      - 'falco/**'
+      - 'cluster/**'
+      - 'scripts/ci-attack-and-assert.sh'
+      - '.github/workflows/purple-team.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'rules/**'
+      - 'falco/**'
+      - 'cluster/**'
+      - 'scripts/ci-attack-and-assert.sh'
+      - '.github/workflows/purple-team.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: purple-team-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # required for the coverage-comment step
+
+jobs:
+  attack-and-detect:
+    name: kind + Falco + scripted attacks → assert coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # kind = Kubernetes IN Docker. Spins a single-node cluster on the
+      # GHA runner in ~30s. Faster + cheaper than k3d for our needs.
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: purple-range
+          # Pin a known-good k8s version so CI doesn't drift the day kind
+          # default bumps to a version Falco's Helm chart hasn't tested.
+          node_image: kindest/node:v1.31.4
+
+      - name: Show cluster info
+        run: |
+          kubectl cluster-info
+          kubectl get nodes -o wide
+          uname -r
+
+      # Helm = the k8s package manager. Falco's official chart wires up
+      # the DaemonSet, RBAC, ConfigMap, and the eBPF probe.
+      - name: Install Falco via Helm
+        run: |
+          helm repo add falcosecurity https://falcosecurity.github.io/charts
+          helm repo update
+          kubectl create namespace falco
+          helm install falco falcosecurity/falco \
+            -n falco \
+            -f falco/values.yaml \
+            --set-file customRules.cyber-range-rules\.yaml=falco/custom-rules/cyber-range-rules.yaml \
+            --wait \
+            --timeout=5m
+
+      - name: Wait for Falco DaemonSet to be Ready
+        run: |
+          kubectl rollout status daemonset/falco -n falco --timeout=180s
+          kubectl get pods -n falco -o wide
+
+      # Quick sanity: confirm rule_matching=all + our T1003.008 are loaded.
+      - name: Verify Falco config + custom rules loaded
+        run: |
+          POD=$(kubectl get pod -n falco -l app.kubernetes.io/name=falco -o jsonpath='{.items[0].metadata.name}')
+          echo "=== rule_matching ==="
+          kubectl exec -n falco "$POD" -c falco -- grep "rule_matching" /etc/falco/falco.yaml
+          echo "=== Custom rules loaded ==="
+          kubectl exec -n falco "$POD" -c falco -- grep -E "^- rule:" /etc/falco/rules.d/cyber-range-rules.yaml | wc -l
+
+      - name: Deploy compromised-host pod
+        run: |
+          kubectl apply -f cluster/ci-compromised-host.yaml
+          kubectl wait --for=condition=Ready pod/compromised-host --timeout=120s
+          kubectl get pod compromised-host -o wide
+
+      - name: Run attack burst + assert coverage
+        run: ./scripts/ci-attack-and-assert.sh
+
+      # On any failure, dump the last bit of Falco logs into the run output
+      # so the reviewer doesn't have to download artifacts to debug.
+      - name: Dump Falco logs on failure
+        if: failure()
+        run: |
+          echo "::group::Falco daemon logs (last 200 lines)"
+          kubectl logs -n falco daemonset/falco -c falco --tail=200 || true
+          echo "::endgroup::"
+          echo "::group::Pod statuses"
+          kubectl get pods -A
+          echo "::endgroup::"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ github.sha }}
+          path: coverage-report.md
+          if-no-files-found: warn
+
+      # Posts the same Markdown report into the PR conversation. Updates
+      # the existing comment in place on subsequent runs (no comment spam).
+      - name: Post coverage to PR
+        if: github.event_name == 'pull_request' && always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: purple-team-coverage
+          path: coverage-report.md

@@ -71,11 +71,17 @@ jobs:
       - name: Compile all rules to all backends
         run: ./scripts/compile.sh
 
+      # `falco -V file` validates one file in isolation, but our rules
+      # reference macros (open_read, spawned_process, ...) defined in Falco's
+      # default rules. We pass both files to a single -V invocation so they
+      # share the same engine, the way they do at runtime in the cluster.
       - name: Validate Falco rule files (offline)
         run: |
+          DEFAULT_RULES=/etc/falco/falco_rules.yaml
+          test -f "$DEFAULT_RULES" || { echo "Default rules not found at $DEFAULT_RULES"; exit 1; }
           for f in falco/custom-rules/*.yaml; do
-            echo "::group::Validating $f"
-            falco -V "$f" || exit 1
+            echo "::group::Validating $f (with default rules loaded)"
+            sudo falco -V "$DEFAULT_RULES" -V "$f"
             echo "::endgroup::"
           done
 

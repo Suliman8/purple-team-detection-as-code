@@ -1,0 +1,105 @@
+name: Rules CI — compile + lint
+
+# Triggers:
+#   - push to main: builds the canonical artifact every time main moves
+#   - pull_request: gates merging; PR cannot merge if rules don't compile
+#   - workflow_dispatch: lets a human re-run from the Actions UI on demand
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rules/**'
+      - 'falco/custom-rules/**'
+      - 'scripts/compile.sh'
+      - '.github/workflows/rules-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'rules/**'
+      - 'falco/custom-rules/**'
+      - 'scripts/compile.sh'
+      - '.github/workflows/rules-ci.yml'
+  workflow_dispatch:
+
+# Cancel any older run of this workflow on the same ref when a new one starts.
+# Saves CI minutes and avoids confusing PR statuses from stale runs.
+concurrency:
+  group: rules-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compile-rules:
+    name: Compile Sigma → 4 backends, lint Falco
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install sigma-cli and backend plug-ins
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            sigma-cli \
+            pysigma-backend-elasticsearch \
+            pysigma-backend-splunk \
+            pysigma-backend-loki \
+            pysigma-pipeline-sysmon
+          sigma version
+
+      # Falco gives us `falco -V <file>` for offline rule validation. We don't
+      # need the Falco *daemon* in this job — just the binary's parser.
+      - name: Install Falco binary (for offline rule validation)
+        run: |
+          curl -fsSL https://falco.org/repo/falcosecurity-packages.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/falco-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/falco-archive-keyring.gpg] \
+            https://download.falco.org/packages/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/falcosecurity.list
+          sudo apt-get update -qq
+          sudo apt-get install -y falco
+          falco --version | head -1
+
+      - name: Validate Sigma syntax
+        run: sigma check rules/
+
+      - name: Compile all rules to all backends
+        run: ./scripts/compile.sh
+
+      - name: Validate Falco rule files (offline)
+        run: |
+          for f in falco/custom-rules/*.yaml; do
+            echo "::group::Validating $f"
+            falco -V "$f" || exit 1
+            echo "::endgroup::"
+          done
+
+      - name: Show compilation summary
+        run: |
+          echo "### Compilation summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | Files |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|------:|" >> $GITHUB_STEP_SUMMARY
+          for d in dist/*/; do
+            backend=$(basename "$d")
+            count=$(find "$d" -type f | wc -l)
+            echo "| $backend | $count |" >> $GITHUB_STEP_SUMMARY
+          done
+
+      - name: Upload compiled rule pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: rule-pack-${{ github.sha }}
+          path: dist/
+          retention-days: 14
+          if-no-files-found: error

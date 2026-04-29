@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────
-# CI assertion script — runs the standard attack burst against the
-# compromised-host pod, then verifies that exactly the expected set of
-# our custom Falco rules fired (no more, no less).
+# CI assertion script — runs the standard attack burst inside a Docker
+# container, then verifies that exactly the expected set of our custom
+# Falco rules fired (no more, no less).
+#
+# Designed to be called by .github/workflows/purple-team.yml AFTER:
+#   1. Falco is running on the host with our custom rules loaded, and
+#   2. Falco's stdout is being captured to $FALCO_LOG_FILE.
 #
 # Exits 0 → all expected rules fired AND no unexpected rule fired.
 # Exits 1 → at least one rule missing OR at least one false positive.
 #
-# Writes a Markdown coverage table to $GITHUB_STEP_SUMMARY (when present)
-# and to ./coverage-report.md (always), so the workflow can post it as a
-# PR comment.
+# Writes a Markdown coverage table to ./coverage-report.md and to
+# $GITHUB_STEP_SUMMARY (when present), so the workflow can post the
+# table back to the PR.
 # ─────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-NAMESPACE_FALCO="falco"
-NAMESPACE_TARGET="default"
-TARGET_POD="compromised-host"
-LOG_WINDOW="3m"   # how far back to scan Falco logs after the attack burst
+FALCO_LOG_FILE="${FALCO_LOG_FILE:-/tmp/falco-events.log}"
+ATTACK_IMAGE="${ATTACK_IMAGE:-ubuntu:22.04}"
 
 # All 15 custom techniques we ship. Used to flag "rule fired but wasn't
 # expected" — the false-positive side of the gate.
@@ -36,9 +38,13 @@ EXPECTED=(
 )
 
 echo "════════════════════════════════════════════════════════════"
-echo " Step 1/4 — Running attack burst inside ${TARGET_POD}"
+echo " Step 1/4 — Running attack burst in docker (${ATTACK_IMAGE})"
 echo "════════════════════════════════════════════════════════════"
-kubectl exec -n "${NAMESPACE_TARGET}" "${TARGET_POD}" -- sh -c '
+# Single docker run — one container = one set of contiguous events that
+# Falco can attribute to the same container.id.
+docker run --rm --name ci-attack-target "${ATTACK_IMAGE}" sh -c '
+  apt-get update -qq > /dev/null 2>&1 || true
+  apt-get install -y -qq procps > /dev/null 2>&1 || true
   whoami
   id
   hostname
@@ -51,20 +57,25 @@ kubectl exec -n "${NAMESPACE_TARGET}" "${TARGET_POD}" -- sh -c '
 
 echo ""
 echo "════════════════════════════════════════════════════════════"
-echo " Step 2/4 — Waiting 10s for Falco to flush events to stdout"
+echo " Step 2/4 — Waiting 8s for Falco to flush events to log file"
 echo "════════════════════════════════════════════════════════════"
-sleep 10
+sleep 8
 
 echo ""
 echo "════════════════════════════════════════════════════════════"
-echo " Step 3/4 — Extracting our custom rule firings from Falco logs"
+echo " Step 3/4 — Extracting our custom rule firings from Falco log"
+echo "           (${FALCO_LOG_FILE})"
 echo "════════════════════════════════════════════════════════════"
-RAW_LOGS=$(kubectl logs -n "${NAMESPACE_FALCO}" daemonset/falco -c falco --since="${LOG_WINDOW}" 2>&1)
-echo "${RAW_LOGS}" | wc -l | xargs printf "  Total log lines pulled: %s\n"
+if [[ ! -s "${FALCO_LOG_FILE}" ]]; then
+  echo "ERROR: ${FALCO_LOG_FILE} is missing or empty — Falco is not writing events."
+  exit 1
+fi
+
+LINES=$(wc -l < "${FALCO_LOG_FILE}")
+echo "  Total log lines: ${LINES}"
 
 # Pull rule names matching our T-prefix scheme (T1xxx or T1xxx.yyy).
-FIRED_RULES=$(echo "${RAW_LOGS}" \
-  | grep -oE '"rule":"T[0-9]+(\.[0-9]+)?[^"]*"' \
+FIRED_RULES=$(grep -oE '"rule":"T[0-9]+(\.[0-9]+)?[^"]*"' "${FALCO_LOG_FILE}" \
   | sed -E 's/"rule":"//; s/".*//' \
   | sort -u)
 
@@ -110,7 +121,7 @@ REPORT="./coverage-report.md"
 {
   echo "## Purple-Team Coverage Report"
   echo ""
-  echo "Attack burst executed inside \`${TARGET_POD}\` pod, then Falco logs scanned for our custom \`T1xxx\` rules."
+  echo "Attack burst executed in a \`${ATTACK_IMAGE}\` Docker container, then Falco logs scanned for our custom \`T1xxx\` rules."
   echo ""
   echo "### Expected detections"
   echo ""

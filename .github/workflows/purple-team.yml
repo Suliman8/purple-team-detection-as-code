@@ -10,7 +10,6 @@ on:
     paths:
       - 'rules/**'
       - 'falco/**'
-      - 'cluster/**'
       - 'scripts/ci-attack-and-assert.sh'
       - '.github/workflows/purple-team.yml'
   push:
@@ -18,7 +17,6 @@ on:
     paths:
       - 'rules/**'
       - 'falco/**'
-      - 'cluster/**'
       - 'scripts/ci-attack-and-assert.sh'
       - '.github/workflows/purple-team.yml'
   workflow_dispatch:
@@ -33,92 +31,99 @@ permissions:
 
 jobs:
   attack-and-detect:
-    name: kind + Falco + scripted attacks → assert coverage
+    # WHY no kind / Helm / DaemonSet:
+    # Earlier versions ran Falco as a kind-cluster DaemonSet, but GHA's
+    # Azure-kernel-inside-Docker-inside-kind nesting fails for both
+    # modern_ebpf (scap_init) and legacy ebpf (driver-loader compile).
+    # Running Falco directly on the runner host watches the same syscalls
+    # we care about — those produced by `docker run` containers — without
+    # the nested-driver pain. Same rules, same matches.
+    name: Falco on host + docker attack target → assert coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
+
+    env:
+      FALCO_LOG_FILE: /tmp/falco-events.log
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # kind = Kubernetes IN Docker. Spins a single-node cluster on the
-      # GHA runner in ~30s. Faster + cheaper than k3d for our needs.
-      - name: Create kind cluster
-        uses: helm/kind-action@v1
-        with:
-          cluster_name: purple-range
-          # Pin a known-good k8s version so CI doesn't drift the day kind
-          # default bumps to a version Falco's Helm chart hasn't tested.
-          node_image: kindest/node:v1.31.4
+      - name: Show host kernel info
+        run: uname -r
 
-      - name: Show cluster info
+      - name: Install Falco binary
         run: |
-          kubectl cluster-info
-          kubectl get nodes -o wide
-          uname -r
+          curl -fsSL https://falco.org/repo/falcosecurity-packages.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/falco-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/falco-archive-keyring.gpg] \
+            https://download.falco.org/packages/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/falcosecurity.list
+          sudo apt-get update -qq
+          # FALCO_FRONTEND=noninteractive prevents the install from
+          # interactively asking which driver to bake in; we configure
+          # the driver via -o engine.kind=modern_ebpf at runtime instead.
+          DEBIAN_FRONTEND=noninteractive \
+            sudo -E apt-get install -y --no-install-recommends falco
+          falco --version | head -1
 
-      # Helm = the k8s package manager. Falco's official chart wires up
-      # the DaemonSet, RBAC, ConfigMap, and the eBPF probe.
-      # Pin chart version so a fresh Falco release doesn't break CI
-      # without warning. Bump deliberately, with a PR.
-      - name: Install Falco via Helm
-        env:
-          FALCO_CHART_VERSION: "4.16.0"
+      - name: Install our custom rules into /etc/falco/rules.d/
         run: |
-          helm repo add falcosecurity https://falcosecurity.github.io/charts
-          helm repo update
-          kubectl create namespace falco
-          # Single-quote the --set-file arg so the backslash that escapes
-          # the dot in `cyber-range-rules.yaml` survives bash word-splitting
-          # and reaches Helm intact. Without this, the dot is interpreted
-          # as a nested-key separator and the chart template errors with
-          # "expected string; got map[string]interface {}".
-          # Helm merges -f files left-to-right. values-ci.yaml overrides
-          # the production driver setting (modern_ebpf -> ebpf) for the
-          # reasons documented in falco/values-ci.yaml.
-          helm install falco falcosecurity/falco \
-            --version "${FALCO_CHART_VERSION}" \
-            -n falco \
-            -f falco/values.yaml \
-            -f falco/values-ci.yaml \
-            --set-file 'customRules.cyber-range-rules\.yaml=falco/custom-rules/cyber-range-rules.yaml' \
-            --wait \
-            --timeout=5m
+          sudo cp falco/custom-rules/cyber-range-rules.yaml \
+            /etc/falco/rules.d/cyber-range-rules.yaml
+          ls -l /etc/falco/rules.d/
 
-      - name: Wait for Falco DaemonSet to be Ready
+      - name: Start Falco in background, capturing stdout to log file
         run: |
-          kubectl rollout status daemonset/falco -n falco --timeout=180s
-          kubectl get pods -n falco -o wide
+          # -A enables all rules; -o rule_matching=all matches our
+          # production setting (see falco/values.yaml — required so
+          # custom rules aren't suppressed by built-ins firing first).
+          # -o engine.kind=modern_ebpf forces the modern eBPF driver,
+          # which works on the bare GHA host kernel (the case we lacked
+          # in the kind setup).
+          sudo touch "${FALCO_LOG_FILE}"
+          sudo chmod 666 "${FALCO_LOG_FILE}"
+          sudo nohup falco \
+            -A \
+            -o rule_matching=all \
+            -o json_output=true \
+            -o json_include_output_property=true \
+            -o engine.kind=modern_ebpf \
+            > "${FALCO_LOG_FILE}" 2>&1 &
+          echo "Falco PID: $!"
 
-      # Quick sanity: confirm rule_matching=all + our T1003.008 are loaded.
-      - name: Verify Falco config + custom rules loaded
+      - name: Wait for Falco to finish initializing
         run: |
-          POD=$(kubectl get pod -n falco -l app.kubernetes.io/name=falco -o jsonpath='{.items[0].metadata.name}')
-          echo "=== rule_matching ==="
-          kubectl exec -n falco "$POD" -c falco -- grep "rule_matching" /etc/falco/falco.yaml
-          echo "=== Custom rules loaded ==="
-          kubectl exec -n falco "$POD" -c falco -- grep -E "^- rule:" /etc/falco/rules.d/cyber-range-rules.yaml | wc -l
-
-      - name: Deploy compromised-host pod
-        run: |
-          kubectl apply -f cluster/ci-compromised-host.yaml
-          kubectl wait --for=condition=Ready pod/compromised-host --timeout=120s
-          kubectl get pod compromised-host -o wide
+          # Falco emits "Starting health webserver" once it's fully up.
+          for i in {1..30}; do
+            if grep -q "Starting health webserver" "${FALCO_LOG_FILE}" 2>/dev/null; then
+              echo "Falco is ready (after ${i}s)"
+              echo ""
+              echo "=== Falco startup log ==="
+              cat "${FALCO_LOG_FILE}"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ERROR: Falco didn't reach 'health webserver' in 30s. Log so far:"
+          cat "${FALCO_LOG_FILE}" || true
+          exit 1
 
       - name: Run attack burst + assert coverage
         run: ./scripts/ci-attack-and-assert.sh
 
-      # On any failure, dump the last bit of Falco logs into the run output
-      # so the reviewer doesn't have to download artifacts to debug.
-      - name: Dump Falco logs on failure
+      # On any failure, dump Falco logs + recent activity to the run output
+      # so a reviewer doesn't need to download artifacts to debug.
+      - name: Dump Falco log on failure
         if: failure()
         run: |
-          echo "::group::Falco daemon logs (last 200 lines)"
-          kubectl logs -n falco daemonset/falco -c falco --tail=200 || true
+          echo "::group::Falco event log (last 200 lines)"
+          tail -n 200 "${FALCO_LOG_FILE}" || true
           echo "::endgroup::"
-          echo "::group::Pod statuses"
-          kubectl get pods -A
-          echo "::endgroup::"
+
+      - name: Stop Falco
+        if: always()
+        run: sudo pkill -f '^falco' || true
 
       - name: Upload coverage report
         if: always()

@@ -74,9 +74,13 @@ fi
 LINES=$(wc -l < "${FALCO_LOG_FILE}")
 echo "  Total log lines: ${LINES}"
 
-# Pull rule names matching our T-prefix scheme (T1xxx or T1xxx.yyy).
-FIRED_RULES=$(grep -oE '"rule":"T[0-9]+(\.[0-9]+)?[^"]*"' "${FALCO_LOG_FILE}" \
-  | sed -E 's/"rule":"//; s/".*//' \
+# Use jq to pull each event's `rule` field — proper JSON parsing avoids
+# brittleness with regex (e.g. when an `output` string also contains
+# brackets like "[T1083]" which a grep regex could mismatch).
+# `--raw-output` strips JSON quoting; `select(.rule != null)` skips
+# any non-event lines (e.g. Falco's startup info messages).
+FIRED_RULES=$(jq -r 'select(.rule != null) | .rule' "${FALCO_LOG_FILE}" 2>/dev/null \
+  | grep -E '^T[0-9]+(\.[0-9]+)?( |$)' \
   | sort -u)
 
 # Extract just the technique IDs (first whitespace-delimited token).

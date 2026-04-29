@@ -6,13 +6,13 @@ description: |
   is world-readable so any access alone is not suspicious — but interactive
   shells reading it via cat/less/grep is a known recon pattern.
 references:
-  - https://attack.mitre.org/techniques/T1003/
+  - https://attack.mitre.org/techniques/T1003/001/
 author: Suliman Khalid Noor
 date: 2026-04-29
 tags:
   - attack.credential-access
   - attack.discovery
-  - attack.t1003
+  - attack.t1003.001
 logsource:
   product: linux
   category: process_creation

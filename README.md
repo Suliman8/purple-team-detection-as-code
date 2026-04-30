@@ -1,261 +1,217 @@
-# Project 3 — Detection Engineering as Code (Purple-Team CI)
+# Purple-Team Detection-as-Code
 
-A self-testing security platform that **attacks itself every day** to prove its detection rules still work. Built as part of the *DevOps Advance* portfolio.
+**A self-testing security platform that attacks itself on every Pull Request — and blocks the merge if a detection regresses.**
 
-> *"If an attacker ran technique T1059.004 tomorrow, would we catch them?"* — this project answers that question on every Pull Request.
+> *"If an attacker ran technique T1059.004 tomorrow, would we catch them?"*
+> This repo answers that question automatically, in three minutes, on every PR.
 
----
-
-## What This Is
-
-A purple-team CI pipeline where:
-
-1. **Vulnerable apps** (Juice Shop, etc.) live in an isolated Kubernetes namespace
-2. **Attack simulators** (Caldera, Atomic Red Team — Week 2) run hacker techniques against them
-3. **Detection rules** (Sigma — Week 3) try to catch each attack
-4. **GitHub Actions** (Week 5) verify every code change doesn't break detection
-5. **MITRE ATT&CK heatmap** (Week 6) shows coverage like a code-coverage report
-
-**Outcome:** instead of *hoping* the alarms work, we *prove* they work — every PR, every night.
+Built over 8 weeks as Project 3 of the **DevOps Advance** portfolio.
 
 ---
 
-## Attack Architecture
+## The Headline — Coverage Before vs After
+
+The MITRE ATT&CK matrix below shows what we detect. Green = rule exists **and** CI proves it fires. Yellow = rule exists, untested. Gray = no rule.
+
+### Before Week 7
+*5 verified detections, 12 untested rules.*
+
+![Before — 5 green, 12 yellow](docs/before.png)
+
+### After Week 7
+*15 verified detections, 7 untested rules — three times more proven coverage in one week, and one false-positive caught before it could ever ship to production.*
+
+![After — 15 green, 7 yellow](docs/after.png)
+
+---
+
+## Impact Metrics
+
+| Metric | Final |
+|--------|------:|
+| Sigma source rules | **20** |
+| Falco runtime rules (production) | **20** |
+| MITRE ATT&CK techniques covered | **22** |
+| Of those, **CI-verified firing on real attacks** | **15** |
+| SIEM dialects each rule compiles to | **4** (Elastic EQL, Kibana Lucene, Splunk SPL, Grafana LogQL) |
+| Rules per PR auto-compiled in CI | **80** (20 source × 4 backends) |
+| Production-relevant false positive caught by CI | **1** (T1053.003 firing on host-level dockerd) |
+| Average CI time per PR | ~3 min (purple-team) + ~50s (compile gate) |
+
+---
+
+## What This Repo Actually Is
+
+A **purple-team CI pipeline** with three reinforcing pieces:
+
+1. **Detection rules** (`rules/` — Sigma + `falco/custom-rules/` — Falco) — alarms that catch specific attacker techniques.
+2. **Compilation pipeline** (`scripts/compile.sh`) — translates each Sigma rule to four SIEM dialects, validated on every PR by `.github/workflows/rules-ci.yml`.
+3. **Live attack-and-detect gate** (`.github/workflows/purple-team.yml`) — spins up Falco on a fresh GitHub runner, runs a scripted attack burst inside a Docker container, and **fails the build** if any expected rule didn't fire or any unexpected one did.
+
+The core insight: **untested rules are more dangerous than no rule at all** (you *think* you're protected). This project moves rules from "we have it" to "CI proves it works on every change."
+
+---
+
+## Architecture (One Picture)
 
 ```
-┌────────────── Your laptop ──────────────────────────────────┐
-│                                                             │
-│  ┌── Caldera Server (Docker) ──┐                            │
-│  │  http://localhost:8888      │                            │
-│  │  16 plugins, 10000+ attacks │                            │
-│  └────────────┬────────────────┘                            │
-│               │ HTTP beacon every 30-60s                    │
-│               ▼                                             │
-│  ┌── kind cluster ────────────────────────────────────┐    │
-│  │                                                    │    │
-│  │  ┌── cyber-range namespace ────────────────────┐  │    │
-│  │  │                                              │  │    │
-│  │  │  ┌────────────────┐    ┌──────────────────┐ │  │    │
-│  │  │  │ compromised-   │───▶│ juice-shop pod   │ │  │    │
-│  │  │  │ host pod       │    │ (the target)     │ │  │    │
-│  │  │  │ (Sandcat agent)│    │                  │ │  │    │
-│  │  │  └────────────────┘    └──────────────────┘ │  │    │
-│  │  │                                              │  │    │
-│  │  │  Isolated: ResourceQuota + NetworkPolicy    │  │    │
-│  │  └──────────────────────────────────────────────┘  │    │
-│  └────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-
-Flow: You click attack in Caldera UI → Sandcat picks up command on
-      next beacon → Sandcat executes against juice-shop → results
-      stream back to Caldera → logs generated for Sigma to detect.
+                  Developer opens a PR
+                          │
+                          ▼
+        ┌─────────────────────────────────────────┐
+        │         GitHub Actions (free tier)      │
+        ├─────────────────────────────────────────┤
+        │                                          │
+        │  ┌─ Workflow 1 ──────────────────┐      │
+        │  │ Rules CI                      │      │
+        │  │ ┌── pySigma ──────────┐       │      │
+        │  │ │ rules/*.yml ─► dist/│       │      │
+        │  │ │  ├ eql/             │       │      │
+        │  │ │  ├ lucene/          │       │      │
+        │  │ │  ├ splunk/          │       │      │
+        │  │ │  └ loki/            │       │      │
+        │  │ └─────────────────────┘       │      │
+        │  │ ┌── falco -V ────────┐        │      │
+        │  │ │ Lint Falco rules   │        │      │
+        │  │ └────────────────────┘        │      │
+        │  └───────────────────────────────┘      │
+        │                                          │
+        │  ┌─ Workflow 2 ──────────────────┐      │
+        │  │ Purple Team                   │      │
+        │  │ ┌── Falco on host ─────────┐  │      │
+        │  │ │ modern_ebpf, our rules,  │  │      │
+        │  │ │ rule_matching=all        │  │      │
+        │  │ └────────────┬─────────────┘  │      │
+        │  │              ▼                │      │
+        │  │ ┌── docker run ubuntu ─────┐ │      │
+        │  │ │ scripted attack burst    │ │      │
+        │  │ │ (whoami, cat /etc/shadow,│ │      │
+        │  │ │  find id_rsa, base64|sh, │ │      │
+        │  │ │  ifconfig, useradd ...)  │ │      │
+        │  │ └────────────┬─────────────┘ │      │
+        │  │              ▼                │      │
+        │  │ ┌── jq + bash assertion ───┐ │      │
+        │  │ │ EXPECTED set fired? ✅/❌│ │      │
+        │  │ │ UNEXPECTED set silent?✅ │ │      │
+        │  │ └────────────┬─────────────┘ │      │
+        │  └──────────────┼────────────────┘     │
+        │                 ▼                       │
+        │  ┌─ Sticky PR comment ──────────┐      │
+        │  │ Markdown coverage table      │      │
+        │  └──────────────────────────────┘      │
+        │                                          │
+        └─────────────────────────────────────────┘
+                          │
+                  ┌───────┴────────┐
+                  ▼                ▼
+              ✅ merge          ❌ blocked
 ```
 
 ---
 
-## Stack
+## The 8-Week Build
 
-| Layer | Tool | Why |
-|---|---|---|
-| Cluster | **kind** (Kubernetes-in-Docker) | Pivot from k3d due to containerd RPC bug on Docker 29 + Kali 6.12 |
-| Isolation | **Namespace + ResourceQuota + NetworkPolicy** | Multi-tenant pattern; matches real prod isolation |
-| Vulnerable Target | **OWASP Juice Shop v17.1.1** | Modern Node.js stack, 6+ MITRE techniques in one app |
-| Compromised Host | **Ubuntu 22.04 pod + Sandcat agent** | Simulates attacker foothold (post-exploitation) |
-| C2 Server | **MITRE Caldera 5.3.0** (Docker) | Adversary emulation, 16 plugins, 10000+ abilities |
-| Attack Library | **Atomic Red Team** (333 techniques) | Auto-bundled via Caldera atomic plugin |
-| Cloud Sim | **LocalStack v3** | Fake AWS — zero cost, fully reproducible CI |
-| Detection (W3+) | Sigma → Elastic EQL / Falco YAML | Industry standard rules-as-code |
-| Attack Simulation (W2+) | Caldera + Atomic Red Team | MITRE-aligned, scriptable |
-| CI (W5+) | GitHub Actions | Free, integrates with PRs natively |
-| Visualization (W6+) | React + D3 ATT&CK Navigator | Live coverage heatmap |
+Each week's deep-dive document lives in [`docs/`](docs/).
+
+| Week | Topic | Doc |
+|------|-------|-----|
+| 1 | Kubernetes cyber-range (kind cluster, NetworkPolicy isolation, Juice Shop target) | [WEEK1.md](docs/WEEK1.md) |
+| 2 | MITRE Caldera + Sandcat agent + Atomic Red Team integration | [WEEK2.md](docs/WEEK2.md) |
+| 3 | First 16 Sigma + Falco rules covering top Linux ATT&CK techniques | [WEEK3.md](docs/WEEK3.md) |
+| 4 | Sigma → 4-backend compilation pipeline; live Falco DaemonSet via Helm | [WEEK4.md](docs/WEEK4.md) |
+| 5 | GitHub Actions CI — compile gate + live attack-and-detect gate | [WEEK5.md](docs/WEEK5.md) |
+| 6 | MITRE ATT&CK coverage heatmap (Navigator layer export) | [WEEK6.md](docs/WEEK6.md) |
+| 7 | Gap analysis + 5 new rules + 5 yellow→green transitions | [WEEK7.md](docs/WEEK7.md) |
+| 8 | Portfolio writeup (this README) | [WEEK8.md](docs/WEEK8.md) |
 
 ---
 
-## Quick Start
+## How to Run It Locally
 
 ### Prerequisites
-- Docker 27+ (29.x works on most distros)
-- kind 0.30+
-- kubectl 1.31+
-- An existing kind cluster (we reuse `taskflow-demo`)
+- Linux (tested on Kali 6.12) with Docker + kind/k3d
+- Python 3.11+
+- `falco`, `kubectl`, `helm`, `jq` installed
 
-### Bring Up the Cyber Range
-
-```bash
-# 1. Switch to the cluster
-kubectl config use-context kind-taskflow-demo
-
-# 2. Create the isolated namespace + quotas + network policies
-kubectl apply -f cluster/cyber-range-namespace.yaml
-
-# 3. Deploy Juice Shop
-kubectl apply -f apps/juice-shop.yaml
-
-# 4. Wait for it to be ready
-kubectl wait --for=condition=Available deployment/juice-shop -n cyber-range --timeout=180s
-
-# 5. Open it (port-forward in a terminal you'll keep open)
-kubectl port-forward -n cyber-range svc/juice-shop 3001:3000
-
-# 6. Browser → http://localhost:3001
-```
-
-### Bring Up The Attacker Stack (Caldera + compromised-host)
+### Compile all rules to all SIEM dialects (~10s)
 
 ```bash
-# 1. Build & start Caldera (first time: ~10 min, after: ~30s)
-cd caldera/
-docker compose up -d --build
-
-# 2. Get the auto-generated Caldera passwords
-docker logs caldera-server 2>&1 | grep -A 3 "PASSWORD"
-# Saved in caldera/credentials.txt for convenience
-
-# 3. Open Caldera UI: http://127.0.0.1:8888 (login: red / <generated>)
-
-# 4. Allow cyber-range pods to reach Caldera
-kubectl apply -f ../cluster/allow-caldera-egress.yaml
-
-# 5. Deploy the Sandcat-equipped compromised-host pod
-kubectl apply -f ../apps/compromised-host.yaml
-
-# 6. Wait for Sandcat to register
-kubectl logs compromised-host -n cyber-range -f
-# Look for: "[+] Beacon (HTTP): ALIVE"
-
-# 7. Confirm in Caldera UI → Agents tab → web-server-01 should appear
+pip install -r requirements.txt
+./scripts/compile.sh
+# Output appears in dist/{eql,lucene,splunk,loki,falco}/
 ```
 
-### Bring Up LocalStack (Fake AWS)
+### Run the attack-and-detect smoke test locally
 
 ```bash
-cd Localstack/
-docker compose up -d
+# Start Falco in background, line-buffered, writing to a file
+sudo touch /tmp/falco-events.log && sudo chmod 666 /tmp/falco-events.log
+sudo nohup stdbuf -oL falco \
+  -o rule_matching=all \
+  -o json_output=true \
+  -o engine.kind=modern_ebpf \
+  > /tmp/falco-events.log 2>&1 &
 
-# Verify
-curl http://localhost:4566/_localstack/health
+# Run the same scripted attacks the GitHub CI runs
+FALCO_LOG_FILE=/tmp/falco-events.log ./scripts/ci-attack-and-assert.sh
+
+# Cleanup
+sudo pkill -f '^falco'
 ```
 
-### Tear Everything Down
+### Regenerate the coverage heatmap
 
 ```bash
-# Stop port-forward
-pkill -f "kubectl port-forward.*juice-shop"
-
-# Remove the cyber range entirely
-kubectl delete namespace cyber-range
-
-# Stop LocalStack
-cd Localstack/ && docker compose down
+python3 scripts/export-attack-coverage.py
+# -> Wrote dist/attack-coverage.json (15 green / 7 yellow / 22 covered)
+# Then upload that file at https://mitre-attack.github.io/attack-navigator/
 ```
 
 ---
 
-## Folder Structure
+## Repository Layout
 
 ```
-P3/
-├── README.md                          # You are here
-├── cluster/
-│   ├── cyber-range-namespace.yaml     # Namespace + ResourceQuota + NetworkPolicy
-│   ├── allow-caldera-egress.yaml      # Lets attacker pods beacon to Caldera
-│   └── cyber-range.yaml               # (Unused) kind config — see "Engineering Decisions"
-├── apps/
-│   ├── juice-shop.yaml                # Vulnerable Node.js web app target
-│   └── compromised-host.yaml          # Ubuntu pod with Sandcat agent (the "weapon")
-├── caldera/
-│   ├── docker-compose.yml             # Caldera C2 server (joins kind network)
-│   ├── credentials.txt                # Auto-generated Caldera passwords
-│   └── source/                        # MITRE Caldera repo (built into Docker image)
-├── atomic-red-team/                   # Local copy of Red Canary's ART (1000+ atomics)
-└── Localstack/
-    └── docker-compose.yml             # Local AWS simulator (free, offline)
+.
+├── rules/                          ← 20 Sigma source rules (one per technique)
+├── falco/
+│   ├── custom-rules/               ← Hand-authored Falco runtime rules
+│   ├── values.yaml                 ← Helm config for production cluster
+│   └── values-ci.yaml              ← Helm overrides for CI (legacy ebpf etc)
+├── scripts/
+│   ├── compile.sh                  ← Sigma → 4 SIEM backends pipeline
+│   ├── ci-attack-and-assert.sh     ← Attack runner + coverage assertion
+│   └── export-attack-coverage.py   ← Heatmap JSON generator
+├── apps/                           ← Vulnerable target manifests (Juice Shop)
+├── cluster/                        ← Namespace, NetworkPolicy, ResourceQuota
+├── caldera/                        ← MITRE Caldera docker-compose
+├── Localstack/                     ← Local AWS sandbox for cloud-side rules
+├── .github/workflows/
+│   ├── rules-ci.yml                ← Workflow 1 — compile + lint gate
+│   └── purple-team.yml             ← Workflow 2 — live attack & detect
+├── docs/                           ← Per-week deep-dive writeups + screenshots
+├── requirements.txt                ← Pinned pySigma toolchain
+└── README.md                       ← This file
 ```
 
 ---
 
-## Engineering Decisions (Honest Log)
+## What This Project Taught Me
 
-This project hit two real-world DevOps issues during setup. Documenting them so future-me (and reviewers) understand the choices.
+Eight weeks of writing detection rules and watching them fail in CI taught me more than reading any SOC textbook. Three lessons stand out:
 
-### Decision 1: kind over k3d
-**Original plan:** Use k3d (Rancher's k3s-in-Docker).
-**What happened:** k3d 5.8 + Docker 29 + Kali kernel 6.12 produced a containerd RPC handshake bug. The k3d-tools helper container exited before injecting the loadbalancer config; even with `--no-lb`, k3s containerd inside the node failed to register the runtime service.
-**Pivot:** kind (the official Kubernetes-SIG project) — full upstream Kubernetes in Docker. Already proven working on this host (`taskflow-demo` cluster).
-**Trade-off:** Project spec said "k3s." kind runs full K8s instead. Functionally identical for security testing; both are Kubernetes in Docker. Career-wise, kind is closer to the K8s most companies actually run.
+**1. Yellow is more dangerous than gray.** A rule you've written but never tested is *worse* than not having one — you'll *think* you're covered when you're not. The whole second half of the project (Weeks 5–7) is about turning yellow into green, because that's where the real value lives.
 
-### Decision 2: Namespace over Separate Cluster
-**Original plan:** A standalone cyber-range cluster.
-**What happened:** kind cluster creation failed with `"could not find a log line that matches Reached target Multi-User System"` — systemd inside `kindest/node` v1.35 didn't print the expected boot signal under the host's cgroup v2 + overlayfs setup.
-**Pivot:** Reuse the existing kind cluster, isolate Project 3 work in a `cyber-range` namespace with ResourceQuota (CPU/RAM caps) and NetworkPolicy (cross-namespace traffic blocked).
-**Trade-off:** Less isolation than a separate cluster, but mirrors the multi-tenant pattern most production K8s clusters use. Saves ~1 GB RAM. Teaches namespace boundaries — a critical real-world skill.
+**2. CI gates find what code review can't.** The same rule lived through a week of manual smoke tests with no problems. The moment we expanded the CI attack burst, T1053.003 fired on the GHA host's `dockerd`. That's a production-flooding false positive a human reviewer would never have caught — the test environment found it first. The CI gate is the project, more than the rules themselves are.
 
-### Decision 3: Caldera Built From Source (Not Pre-Built Image)
-**Original plan:** Pull a pre-built Caldera image (`mitre/caldera:latest`).
-**What happened:** MITRE doesn't publish official images on Docker Hub. Third-party images exist but are unverified.
-**Pivot:** Cloned Caldera repo with all 12 plugin submodules, built locally via Caldera's own Dockerfile. Tagged as `caldera:cyber-range` (~7 GB image).
-**Lesson:** For security tools, always build from official source. A poisoned attack tool could BE the breach.
-
-### Decision 4: Caldera Random Passwords
-**What happened:** Caldera 5.x auto-generates random passwords on first boot for security. Default `red/admin` doesn't work.
-**Fix:** Random credentials are printed in startup logs (`docker logs caldera-server | grep -A 3 PASSWORD`). Captured to `caldera/credentials.txt` for reproducibility.
-**Lesson:** Modern security tools randomize defaults — read the first-boot log every time.
-
-### Decision 5: Caldera as Docker (Not Kubernetes Pod)
-**Original consideration:** Run Caldera inside the kind cluster as a pod.
-**Pivot:** Run as Docker container on the `kind` Docker network. Simpler (no StatefulSet/PVC), reachable from cluster pods via DNS name `caldera-server`, easier to reset.
-**Trade-off:** Slightly less "cloud-native," but matches how most teams actually deploy attacker infrastructure (separate from the target cluster).
-
-### Decision 6: NetworkPolicy Override For C2 Channel
-**The conflict:** Cyber-range NetworkPolicy blocks egress to `172.16.0.0/12` (private networks). But Caldera lives on `172.20.0.x` — also a private network!
-**Fix:** Created `allow-caldera-egress.yaml` with `podSelector: role=attacker-agent` that explicitly allows egress to `172.20.0.0/16` on Caldera ports only.
-**Lesson:** Default-deny + explicit-allow = real firewall pattern. Defense-in-depth even in our test lab.
-
-### Decision 7: ART Bundled Via Caldera Plugin (Not Standalone)
-**Original plan:** Install Atomic Red Team separately on the compromised-host pod.
-**What happened:** Caldera's `atomic` plugin auto-clones the ART repo as part of build. 333 MITRE techniques accessible via Caldera UI without extra work.
-**Pivot:** Skipped standalone ART install. Cloned ART locally to `./atomic-red-team/` for reference and future custom test development.
-**Lesson:** Read what your tools include before installing duplicates.
-
-### Decision 9: LocalStack v3 (pinned) over v4
-**Original plan:** Use `localstack/localstack:latest`.
-**What happened:** v4+ now requires a paid Pro license (auth token). Free version moved to maintenance.
-**Pivot:** Pinned to `localstack/localstack:3` — stable, free, supports all 5 services we need (S3, IAM, EC2, Lambda, CloudTrail).
-**Lesson:** Always pin Docker image versions. Never trust `:latest` for reproducibility-critical work.
+**3. Production-mirroring CI is a vanity goal.** The first attempt at Week 5's purple-team workflow tried to reproduce production exactly: kind cluster + Helm Falco DaemonSet + kubectl exec. It failed for **eight straight runs** because of nested-container kernel restrictions. The redesign — Falco on the runner host, attacks in a `docker run` container — is structurally different from production, but tests the **same syscalls against the same rules**. CI doesn't have to *be* production; it has to *exercise the rule logic* production runs. That distinction took half a day to internalize and is the single biggest CI lesson here.
 
 ---
 
-## Status
+## License
 
-| Week | Deliverable | Deep Doc | Status |
-|---|---|---|---|
-| **W1** | k3s/k8s cyber range + vulnerable apps | [docs/WEEK1.md](docs/WEEK1.md) | ✅ Done |
-| **W2** | Caldera + Atomic Red Team installation | [docs/WEEK2.md](docs/WEEK2.md) | ✅ Done |
-| **W3** | Sigma rules for top 15 Linux TTPs | [docs/WEEK3.md](docs/WEEK3.md) | ✅ Done |
-| W4 | Sigma → Elastic/Splunk compilation pipeline | Pending |
-| W5 | GitHub Actions PR-triggered attack & detect | Pending |
-| W6 | MITRE coverage heatmap (React + D3) | Pending |
-| W7 | Gap analysis + 10 additional rules | Pending |
-| W8 | "Detection Coverage Before vs After" write-up | Pending |
+MIT — use anything in this repo for your own purple-team work.
 
----
+## Author
 
-## Resource Footprint
-
-Currently running:
-
-| Component | RAM | CPU | Where |
-|---|---|---|---|
-| Juice Shop pod | ~150 MB | ~0.05 cores | `cyber-range` namespace |
-| compromised-host pod | ~80 MB | ~0.02 cores | `cyber-range` namespace |
-| Caldera C2 server | ~600 MB | ~0.1 cores | Docker container (kind network) |
-| LocalStack | ~400 MB | ~0.1 cores | Docker container |
-| **Total Project 3 overhead** | **~1.2 GB** | **~0.3 cores** | |
-
-ResourceQuota on `cyber-range` caps total Project 3 use at **4 GB RAM / 4 CPU cores** — protects laptop from runaway attack pods.
-
----
-
-## Author Notes
-
-Built for learning, not just shipping. Every tool choice is documented above so this project is reproducible and the engineering rationale is visible. If you're reviewing this for a hiring decision, the **"Engineering Decisions"** section is where the real signal is — anyone can copy-paste a tutorial; deciding intelligently between k3d/kind/standalone-vs-namespace under broken tooling is the actual skill.
+**Suliman Khalid Noor** — built as part of the DevOps Advance / DevSecOps engineering portfolio. The full per-week build journey (with all the dead ends, eight CI iterations, and false starts left in) is in [`docs/WEEK1.md`](docs/WEEK1.md) through [`docs/WEEK8.md`](docs/WEEK8.md).

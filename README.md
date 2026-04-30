@@ -128,44 +128,40 @@ Each week's deep-dive document lives in [`docs/`](docs/).
 
 ## How to Run It Locally
 
+### Quickstart — two commands
+
+```bash
+./scripts/setup.sh    # one-time: installs Falco, jq, pySigma toolchain (uses sudo)
+./scripts/demo.sh     # any time: compile + live attack & detect + heatmap export
+```
+
+`demo.sh` will:
+1. Compile all 20 Sigma rules to 4 SIEM dialects (~10s)
+2. Start Falco on the host, run the scripted attack burst inside an `ubuntu:22.04` container, assert all expected rules fired (~30s)
+3. Export the MITRE ATT&CK coverage heatmap to `dist/attack-coverage.json`
+
+It cleans up Falco on exit (trap), and is safe to re-run.
+
 ### Prerequisites
-- Linux (tested on Kali 6.12) with Docker + kind/k3d
+- Linux with Docker installed (tested on Kali 6.12 / Ubuntu 22.04+)
 - Python 3.11+
-- `falco`, `kubectl`, `helm`, `jq` installed
+- `sudo` access (Falco's eBPF probe needs root)
 
-### Compile all rules to all SIEM dialects (~10s)
+### Run the individual pieces (advanced)
 
 ```bash
-pip install -r requirements.txt
+# Just the compilation pipeline
 ./scripts/compile.sh
-# Output appears in dist/{eql,lucene,splunk,loki,falco}/
-```
 
-### Run the attack-and-detect smoke test locally
-
-```bash
-# Start Falco in background, line-buffered, writing to a file
-sudo touch /tmp/falco-events.log && sudo chmod 666 /tmp/falco-events.log
-sudo nohup stdbuf -oL falco \
-  -o rule_matching=all \
-  -o json_output=true \
-  -o engine.kind=modern_ebpf \
-  > /tmp/falco-events.log 2>&1 &
-
-# Run the same scripted attacks the GitHub CI runs
-FALCO_LOG_FILE=/tmp/falco-events.log ./scripts/ci-attack-and-assert.sh
-
-# Cleanup
-sudo pkill -f '^falco'
-```
-
-### Regenerate the coverage heatmap
-
-```bash
+# Just the heatmap export (assumes rules/ already exists)
 python3 scripts/export-attack-coverage.py
-# -> Wrote dist/attack-coverage.json (15 green / 7 yellow / 22 covered)
-# Then upload that file at https://mitre-attack.github.io/attack-navigator/
+
+# Just the attack-and-assert (assumes Falco already running, log file env var set)
+FALCO_LOG_FILE=/tmp/falco-demo.log ./scripts/ci-attack-and-assert.sh
 ```
+
+### View the heatmap
+After `demo.sh` finishes, upload `dist/attack-coverage.json` at https://mitre-attack.github.io/attack-navigator/ (Open Existing Layer → Upload from local) and press `E` to expand sub-techniques.
 
 ---
 

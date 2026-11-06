@@ -7,7 +7,7 @@ description: |
   Containers should never need to clear their own logs.
 references:
   - https://attack.mitre.org/techniques/T1070/002/
-author: Suliman Khalid Noor
+author: Suliman Khan
 date: 2026-04-29
 tags:
   - attack.defense-evasion

@@ -10,7 +10,7 @@ description: |
 references:
   - https://attack.mitre.org/techniques/T1003/008/
   - https://github.com/SigmaHQ/sigma/blob/master/rules/linux/file_event/file_event_lnx_etc_shadow.yml
-author: Suliman Khalid Noor
+author: Suliman Khan
 date: 2026-04-29
 tags:
   - attack.credential-access

@@ -8,7 +8,7 @@ description: |
 references:
   - https://attack.mitre.org/techniques/T1611/
   - https://blog.trailofbits.com/2019/07/19/understanding-docker-container-escapes/
-author: Suliman Khalid Noor
+author: Suliman Khan
 date: 2026-04-29
 tags:
   - attack.privilege-escalation

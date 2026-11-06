@@ -7,7 +7,7 @@ description: |
   Common in dropper scripts and reverse-shell one-liners.
 references:
   - https://attack.mitre.org/techniques/T1027/
-author: Suliman Khalid Noor
+author: Suliman Khan
 date: 2026-04-29
 tags:
   - attack.defense-evasion

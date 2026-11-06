@@ -7,7 +7,7 @@ description: |
   movement to other systems.
 references:
   - https://attack.mitre.org/techniques/T1552/004/
-author: Suliman Khalid Noor
+author: Suliman Khan
 date: 2026-04-29
 tags:
   - attack.credential-access

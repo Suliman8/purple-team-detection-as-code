@@ -210,4 +210,4 @@ MIT — use anything in this repo for your own purple-team work.
 
 ## Author
 
-**Suliman Khalid Noor** — built as part of the DevOps Advance / DevSecOps engineering portfolio. The full per-week build journey (with all the dead ends, eight CI iterations, and false starts left in) is in [`docs/WEEK1.md`](docs/WEEK1.md) through [`docs/WEEK8.md`](docs/WEEK8.md).
+**Suliman Khan** — built as part of the DevOps Advance / DevSecOps engineering portfolio. The full per-week build journey (with all the dead ends, eight CI iterations, and false starts left in) is in [`docs/WEEK1.md`](docs/WEEK1.md) through [`docs/WEEK8.md`](docs/WEEK8.md).

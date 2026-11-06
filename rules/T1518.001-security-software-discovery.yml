@@ -8,7 +8,7 @@ description: |
   starting noisy actions.
 references:
   - https://attack.mitre.org/techniques/T1518/001/
-author: Suliman Khalid Noor
+author: Suliman Khan
 date: 2026-04-29
 tags:
   - attack.discovery

@@ -7,7 +7,7 @@ description: |
   a common post-exploitation step (find security tools, find creds in env vars).
 references:
   - https://attack.mitre.org/techniques/T1057/
-author: Suliman Khalid Noor
+author: Suliman Khan
 date: 2026-04-29
 tags:
   - attack.discovery
